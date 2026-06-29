@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Direct Keyboard & Mouse HID Controller</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 350px;
+            background-color: #1e1e1e;
+            border-right: 1px solid #333;
+            padding: 15px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+        }
+        .capture-area {
+            flex-grow: 1;
+            background-color: #0b0b0b;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border: 2px dashed #444;
+            margin: 20px;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+        }
+        .capture-area.active {
+            border-color: #007acc;
+            background-color: #112233;
+        }
+        label {
+            font-size: 12px;
+            font-weight: bold;
+            color: #aaaaaa;
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            background-color: #2d2d2d;
+            border: 1px solid #444;
+            color: #fff;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 13px;
+        }
+        input[type="text"]:focus {
+            border-color: #007acc;
+            outline: none;
+        }
+        button {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007acc;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        button:hover {
+            background-color: #005999;
+        }
+        .status {
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        .connected {
+            background-color: #2e7d32;
+            color: #fff;
+        }
+        .disconnected {
+            background-color: #c62828;
+            color: #fff;
+        }
+        .log-console {
+            flex-grow: 1;
+            background-color: #000000;
+            font-family: monospace;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-y: auto;
+            font-size: 11px;
+            color: #00ff00;
+            border: 1px solid #333;
+            min-height: 200px;
+        }
+        h3 {
+            margin: 0 0 5px 0;
+            font-size: 16px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+        .key-display {
+            font-size: 48px;
+            font-weight: bold;
+            color: #007acc;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h3>Configuration</h3>
+
+        <div>
+            <label>Phone IP Address:</label>
+            <input type="text" id="phoneIp" value="192.168.1.239">
+            <button onclick="connectPhone()" style="margin-top: 5px; width: 100%;">Connect Phone</button>
+        </div>
+
+        <div id="phoneStatus" class="status disconnected">Phone Disconnected</div>
+
+        <div>
+            <label style="display: flex; align-items: center; gap: 5px;">
+                <input type="checkbox" id="preventDefaults" checked> Prevent Browser Shortcuts
+            </label>
+            <small style="color: #888; display: block; margin-top: 2px;">
+                Stops keys like Space, Arrows, or Backspace from moving the browser page.
+            </small>
+        </div>
+
+        <h3>Console Log</h3>
+        <div id="logConsole" class="log-console">System initialized...</div>
+    </div>
+
+    <div class="capture-area" id="captureZone">
+        <h2>Direct Input Relay</h2>
+        <p>Click inside this dark zone to lock your mouse and start capturing.</p>
+        <p style="font-size: 12px; color: #888;">Press <strong>ESC</strong> to release the mouse pointer.</p>
+        <div id="lastKey" class="key-display">-</div>
+    </div>
+
+    <script>
+    let ws;
+    const captureZone = document.getElementById('captureZone');
+    const lastKeyDiv = document.getElementById('lastKey');
+    const preventDefaultsCheck = document.getElementById('preventDefaults');
+    let isFocused = false;
+
+    // Track currently held keys down
+    const activeKeys = new Set();
+
+    // Mouse movement accumulation variables
+    let accumulatedX = 0;
+    let accumulatedY = 0;
+    let mouseBufferInterval = null;
+
+    function logToConsole(msg) {
+        const consoleDiv = document.getElementById('logConsole');
+        consoleDiv.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    }
+
+    // Connect to the phone's WebSocket server
+    function connectPhone() {
+        const ip = document.getElementById('phoneIp').value.trim();
+        const statusDiv = document.getElementById('phoneStatus');
+
+        statusDiv.textContent = "Connecting...";
+        statusDiv.className = "status";
+
+        ws = new WebSocket(`ws://${ip}:8765`);
+
+        ws.onopen = () => {
+            statusDiv.textContent = "Phone Connected";
+            statusDiv.className = "status connected";
+            logToConsole("Connected to phone WebSocket server.");
+        };
+
+        ws.onclose = () => {
+            statusDiv.textContent = "Phone Disconnected";
+            statusDiv.className = "status disconnected";
+            logToConsole("Disconnected from phone.");
+            activeKeys.clear();
+        };
+
+        ws.onerror = (err) => {
+            statusDiv.textContent = "Connection Error";
+            statusDiv.className = "status disconnected";
+            logToConsole("WebSocket Error: " + err.message);
+        };
+    }
+
+    // Helper to format/clean up browser key names to your preferred format
+    function normalizeKey(rawKey) {
+        let key = rawKey.toLowerCase();
+
+        // Custom mappings
+        if (key === ' ') return 'space';
+        if (key === 'arrowup') return 'up';
+        if (key === 'arrowdown') return 'down';
+        if (key === 'arrowleft') return 'left';
+        if (key === 'arrowright') return 'right';
+
+        return key;
+    }
+
+    // Request pointer lock on click
+    captureZone.addEventListener('click', () => {
+        captureZone.requestPointerLock();
+    });
+
+    // Handle pointer lock state changes
+    document.addEventListener('pointerlockchange', () => {
+        if (document.pointerLockElement === captureZone) {
+            isFocused = true;
+            captureZone.classList.add('active');
+            logToConsole("Keyboard & Mouse capture active. Press ESC to release.");
+
+            // Start buffering mouse movements every 0.5 seconds (500ms)
+            if (!mouseBufferInterval) {
+                mouseBufferInterval = setInterval(sendBufferedMouseMovement, 50);
+            }
+        } else {
+            isFocused = false;
+            captureZone.classList.remove('active');
+            activeKeys.clear();
+            logToConsole("Capture paused. Click back into the dark zone to resume.");
+
+            // Clear mouse buffering interval and reset accumulators
+            if (mouseBufferInterval) {
+                clearInterval(mouseBufferInterval);
+                mouseBufferInterval = null;
+            }
+            accumulatedX = 0;
+            accumulatedY = 0;
+        }
+    });
+
+    // Accumulate mouse movements when pointer is locked
+    document.addEventListener('mousemove', (event) => {
+        if (document.pointerLockElement === captureZone) {
+            accumulatedX += event.movementX;
+            accumulatedY += event.movementY;
+        }
+    });
+
+    // Send accumulated mouse movements and clamp them between -127 and 127
+    function sendBufferedMouseMovement() {
+        if (accumulatedX !== 0 || accumulatedY !== 0) {
+            const clampedX = Math.max(-127, Math.min(127, accumulatedX));
+            const clampedY = Math.max(-127, Math.min(127, accumulatedY));
+
+            sendCommand("mouse", `move ${clampedX} ${clampedY}`);
+
+            // Reset accumulators for the next interval
+            accumulatedX = 0;
+            accumulatedY = 0;
+        }
+    }
+
+    // Handle mouse clicks when pointer is locked
+    document.addEventListener('mousedown', (event) => {
+        if (document.pointerLockElement === captureZone) {
+            let clickType = "";
+            if (event.button === 0) {
+                clickType = "left";
+            } else if (event.button === 2) {
+                clickType = "right";
+            }
+
+            if (clickType) {
+                sendCommand("mouse", `click ${clickType}`);
+                lastKeyDiv.textContent = `Mouse: ${clickType.toUpperCase()}`;
+            }
+        }
+    });
+
+    // Prevent context menu from appearing on right-click when locked
+    document.addEventListener('contextmenu', (event) => {
+        if (document.pointerLockElement === captureZone) {
+            event.preventDefault();
+        }
+    });
+
+    // Handle keys being pressed down
+    document.addEventListener('keydown', (event) => {
+        if (!isFocused || event.target.tagName === 'INPUT') return;
+
+        if (preventDefaultsCheck.checked) {
+            event.preventDefault();
+        }
+
+        const keyName = normalizeKey(event.key);
+
+        if (!activeKeys.has(keyName)) {
+            activeKeys.add(keyName);
+
+            // Create dash-separated string (e.g., "up-right" or "ctrl-up")
+            const finalValue = Array.from(activeKeys).join('-');
+
+            // Format UI display to look clean
+            lastKeyDiv.textContent = Array.from(activeKeys)
+                .map(k => k.charAt(0).toUpperCase() + k.slice(1))
+                .join(' + ');
+
+            // Send to phone instantly
+            sendCommand("key", finalValue);
+        }
+    });
+
+    // Handle keys being released
+    document.addEventListener('keyup', (event) => {
+        if (!isFocused || event.target.tagName === 'INPUT') return;
+
+        const keyName = normalizeKey(event.key);
+        activeKeys.delete(keyName);
+    });
+
+    // Reset state if user tabs away completely
+    window.addEventListener('blur', () => {
+        activeKeys.clear();
+    });
+
+    // Send payload to phone
+    function sendCommand(type, value) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            const payload = JSON.stringify({ type: type, value: value });
+            ws.send(payload);
+            logToConsole(`Sent: ${payload}`);
+        } else {
+            logToConsole(`Failed to send: "${value}" (Phone disconnected)`);
+        }
+    }
+</script>
+</body>
+</html>
