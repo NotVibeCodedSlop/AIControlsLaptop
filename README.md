@@ -16,6 +16,6 @@ Now get the IP of your phone and connect both devices to the same LAN.
 
 ## 3. Run
 Now you can use one of 3 things:
-testhid.html (a web browser based thing to just remote control).
-The chatcontrols/ (npm install, npm run) thingy.
-or aicontrolslaptop.py (and put your api key or ollama thingy there).
+- testhid.html (a web browser based thing to just remote control).
+- The chatcontrols/ (npm install, npm run) thingy.
+- or aicontrolslaptop.py (and put your api key or ollama thingy there).
