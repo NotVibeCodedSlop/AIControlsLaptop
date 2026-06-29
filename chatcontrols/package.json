@@ -1,0 +1,12 @@
+{
+  "name": "yt-chat-hid-controller",
+  "version": "1.0.0",
+  "description": "Scrapes YouTube Live Chat and sends HID commands to a rooted Android phone",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^30.0.0"
+  }
+}
