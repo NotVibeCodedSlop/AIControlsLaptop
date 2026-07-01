@@ -15,7 +15,8 @@ Then copy all of them into your termux home dir.
 Now get the IP of your phone and connect both devices to the same LAN.
 
 ## 3. Run
-Now you can use one of 3 things:
+Now you can use one of 4 things:
 - testhid.html (a web browser based thing to just remote control).
 - The chatcontrols/ (npm install, npm run) thingy.
-- or aicontrolslaptop.py (and put your api key or ollama thingy there).
+- aicontrolslaptop.py (and put your api key or ollama thingy there).
+- or aicontrolslaptop_live.py (and put your Gemini api key and use the weird gemini 3.1 flash live preview which has almost no limits on the free teir FOR SOME REASON).
